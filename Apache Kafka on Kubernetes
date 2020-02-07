@@ -1,0 +1,100 @@
+KAFKA ON KUBERNETES:
+•	Go to your GCP Console and go to Kubernetes Engine and create a cluster with machine type of n1-standard-4.
+•	Open Cloud Shell. Switch to root user using “sudo –i”. Use “gcloud container clusters get-credentials [CLUSTER NAME] --zone us-central1-a --project [PROJECT-ID]” to connect to your cluster.
+•	Once inside the cluster, clone this repository from github using “git clone https://github.com/helm/charts.git” . 
+•	Now we need to initialize and configure helm and tiller.
+•	Initialize helm and tiller using “helm init”.
+•	Now create a tiller service account using “ kubectl create serviceaccount tiller –namespace kube-system“.
+•	Now, to bind the tiller serviceaccount to the clusteradmin role, create a YAML file named tiller-clusterrolebinding.yaml and insert the below given content:
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: tiller-clusterrolebinding
+subjects:
+- kind: ServiceAccount
+  name: tiller
+  namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: ""
+•	Now, deploy the clusterrolebinding using “ kubectl create –f tiller-clusterrolebinding.yaml”.
+•	Wait a few seconds for the Tiller server to be redeployed.
+
+
+
+•	Now, to add the “Incubator” repo to your helm run “helm repo add incubator http://storage.googleapis.com/kubernetes-charts-incubator”.
+•	Run “helm repo update”
+•	Now, we will make some changes in /charts/incubator/kafka/values.yaml file:
+The + lines are with the updated values.
+ external:
+-  enabled: false
++  enabled: true
+   # type can be either NodePort or LoadBalancer
+-  type: NodePort
++  type: LoadBalancer
+   # annotations:
+   #  service.beta.kubernetes.io/openstack-internal-load-balancer: "true"
+   dns:
+@@ -138,10 +138,10 @@ external:
+   # If using external service type LoadBalancer and external dns, set distinct to true below.
+   # This creates an A record for each statefulset pod/broker. You should then map the
+   # A record of the broker to the EXTERNAL IP given by the LoadBalancer in your DNS server.
+-  distinct: false
++  distinct: true
+   servicePort: 19092
+   firstListenerPort: 31090
+-  domain: cluster.local
++  domain: example.com
+   loadBalancerIP: []
+   init:
+     image: "lwolf/kubectl_deployer"
+@@ -173,11 +173,11 @@ configurationOverrides:
+   # "advertised.listeners": |-
+   #   EXTERNAL://kafka.cluster.local:$((31090 + ${KAFKA_BROKER_ID}))
+   ## If external service type is LoadBalancer and distinct is true:
+-  # "advertised.listeners": |-
+-  #   EXTERNAL://kafka-$((${KAFKA_BROKER_ID})).cluster.local:19092
++  "advertised.listeners": |-
++    EXTERNAL://kafka-$((${KAFKA_BROKER_ID})).example.com:19092
+   ## Uncomment to define the EXTERNAL Listener protocol
+-  # "listener.security.protocol.map": |-
+-  #   PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
++  "listener.security.protocol.map": |-
++    PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+
+
+•	After all these changes, run the following command to execute the chart with the updated values.yaml:
+•	“helm install –name my-kafka –f values.yaml incubator/kafka”.
+•	After the above command is run, you will get a set of three domain names, add them to the Cloud DNS domain record sets and assign each of them the LoadBalancer IP’s assigned to the kafka services.
+•	Check the running pods: “kubectl get pods”.
+•	Check the running services: “kubectl get svc”.
+•	Now, let’s create a kafka-client pod to create a topic and send messages onto it. For that we need to write a YAML file named kafka-client-pod.yaml:
+apiVersion: v1
+kind: Pod
+metadata:
+  name: testclient
+  namespace: default
+spec:
+  containers:
+  - name: kafka
+    image: solsson/kafka:0.11.0.0
+    command:
+      - sh
+      - -c
+      - "exec tail -f /dev/null"
+
+•	Use “kubectl create –f kafka-client-pod.yaml” to create the pod.
+•	Now go inside this pod to create the topic using “kubectl exec –it  testclient -- /bin/bash”
+•	Once inside create a topic using “ ./ kafka-topics.sh --zookeeper [zookeeper headless service name]:[port] --topic [topic name] --create --partitions 1 --replication-factor 1 --if-not-exists “.
+•	Create a producer using “ kafkacat -b [kafka broker ip]:[port] -P -t [topic name] -p 0 ”
+
+•	Create a consumer using “kafkacat -b [kafka broker ip]:[port] -C -t [topic name] -p 0”
+•	Make sure that you have kafkacat installed in your machine before running the producer and consumer commands.
+
+Helpful links:
+ 1.https://argus-sec.com/external-communication-with-apache-kafka-deployed-in-kubernetes-cluster/
+ 2.https://github.com/helm/charts/tree/master/incubator/kafka
+ 3.https://docs.bitnami.com/kubernetes/how-to/configure-rbac-in-your-kubernetes-cluster/#use-case-2-enable-helm-in-your-cluster
+
+
